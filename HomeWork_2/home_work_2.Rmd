@@ -1,0 +1,183 @@
+---
+title: "Home Work 2"
+author: '''Joba Adisa'
+date: "2022-09-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message = FALSE)
+```
+
+```{r libraries}
+# Loading libraries
+library(dataedu)
+library(tidyverse)
+library(sjPlot)
+
+# Reading Data files
+dat <- read_csv("data/dat.csv")
+measure_mean <- read_csv("data/measure_mean.csv")
+survey_responses <- read_csv("data/survey_responses.csv")
+```
+
+-------------------------------------------------------------------------------------------------------------
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown [Rstudio Rmarkdown](http://rmarkdown.rstudio.com).
+
+-------------------------------------------------------------------------------------------------------------
+
+## Exercise 1
+
+The graph below shows a bar chart distribution of the means of the different measures in the student surveyUsing ggplot to create a bar chart comparing the survey subscale means in the measure_mean data file
+
+
+##
+```{r fig.cap="Fig. 1: Mean distribution of survey measures"}
+measure_mean %>% 
+  ggplot(aes(x = measure, y = mean_response)) + 
+  # draw the plot
+  geom_bar(stat = "Identity", fill = dataedu_colors("turquoise")) + 
+  theme_dataedu() + 
+  labs(title = "Bar Chart Comparing Survey Measures Subscale Means", 
+       x = "Measure", y = "Mean response") +
+  theme(text = element_text(size = 20))
+
+```
+
+## Exercise 2
+
+### The Relationship between Time Spent on Course and Final Grade
+
+The plot below shows the relationship between the time spent by students in a course and their final grade in the course. The plot uses ggplot and geom_point to investigate if a linear relationship exists between both measures.
+
+
+##
+
+```{r fig.cap="Fig. 2: Scatter Plot of Time Spent vs Final Grade"}
+dat %>% 
+  ggplot(aes(x=TimeSpent_std, y=final_grade, color=subject)) + 
+  geom_point() + 
+  # adding least-square regression lines
+  geom_smooth(method = "lm") +
+  # use data science in edu theme
+  theme_dataedu() +
+  # use red, orange, ..., purple as the colors for the points
+  scale_color_manual(values=c("AnPha"="red",
+                             "BioA" = "orange",
+                             "FrScA" = "green",
+                             "OcnA" = "blue",
+                             "PhysA" = "purple")) +
+  # use labs to create title, x, y labs
+  labs(title = "Scatter Plot of Time Spent vs Final Grade", 
+       x = "Time Spent", y = "Final Grade") + 
+  # Increase font size of all text to at least 20
+  theme(text = element_text(size = 20))
+  
+```
+
+
+## Exercise 3
+
+Incorporating the survey subscale scores into the prediction of final course grade from time spent and academic subject.
+
+### Joining Data
+
+Join the dat and survey_responses data files `gradebook <- leftjoin(dat, survey_responses, by="student_id")`
+
+
+```{r}
+# Join the dat and survey_responses data files
+gradebook <- left_join(dat, survey_responses,
+                       by = "student_id")
+gradebook
+
+```
+
+
+### Using Backward Elimination Model Selection Procedure to Get The Best Fitted Model
+
+Fitting a model predicting final_grade from all variables (TimeSpent_std, subject, and pc, int, uv)
+
+
+$$
+\hat{final\_grade} = \hat\beta_0 + \hat\beta_1(TimeSpent_std) + \hat\beta_2(pc) + \hat\beta_3(int)  + \hat\beta_4(uv) + \hat\beta_5(subject) + \epsilon
+$$
+
+br()
+
+```{r fig.cap="Table 3.1: Model 1 Summary Table"}
+m_linear_1 <- lm(final_grade ~ TimeSpent_std + pc + int + uv + subject, data = gradebook)
+tab_model(m_linear_1, title = "Table 3.1")
+```
+
+From Table 3.1 above, The model has an adjusted R^2 of 0.228 and the measure uv with p-value = 0.376 appears to be the least significant predictor of final grade after TimeSpent_std, subject, int and pc. This predictor will be dropped and the model is refitted below:
+
+
+$$
+\hat{final\_grade} = \hat\beta_0 + \hat\beta_1(TimeSpent_std) + \hat\beta_2(pc) + \hat\beta_3(int) + \hat\beta_4(subject) + \epsilon
+$$
+
+```{r fig.cap="Table 3.2: Model 2 Summary Table"}
+m_linear_2 <- lm(final_grade ~ TimeSpent_std + pc + int + subject, data = gradebook)
+tab_model(m_linear_2, title = "Table 3.2")
+```
+
+From Table 3.2 above The model has an adjusted R^2 of 0.229, and the p-value (p-value=0.262) of the "int" measure is greater than 0.05 suggesting that int is not a significant predictor of final grade after TimeSpent_std, subject and pc have been accounted for. As such we can drop this predictor and re-fit the model as follow:
+
+$$
+\hat{final\_grade} = \hat\beta_0 + \hat\beta_1(TimeSpent_std) + \hat\beta_2(pc) + \hat\beta_3(subject) + \epsilon
+$$
+
+
+```{r fig.cap="Table 3.3: Model 3 Summary Table"}
+m_linear_3 <- lm(final_grade ~ TimeSpent_std + pc + subject, data = gradebook)
+tab_model(m_linear_3, title = "Table 3.3")
+```
+
+br()
+
+Our final model has an adjusted R^2 of 0.228 and showed that all the variables (TimeSpent_std, subject and pc) included in our model are significant predictors of students Final Grade (p-values < .05). In this model, Forensic Science [FrScA] and Physics [PhysA] are associated with higher final grades and are significant predictors of students' final grade even after the time spent in the course and "pc" measure have been accounted for, indicating that students in both classes earned higher grades than students in other classes in this data set.
+
+Finally, the model showed that students grade is estimated by 9.80 points for every additional unit of time they spend on a course, after accounting for variations in subjects and "pc" measure.
+
+br()
+
+### Creating the Residual vs FItted Plot
+
+The block of code below plots a residual vs. Fitted plot which helps to assess whether the conditions of linearity and constant variance are met by our fitted model.
+
+```{r fig.cap="Fig 3.1: Residual vs Fitted Plot of Students Final Grades"}
+# getting the residual values
+resids <- resid(m_linear_3)
+# getting the fitted values
+fits <- fitted(m_linear_3)
+# plotting residual vs fitted values using base R plot function
+plot(fits, resids,  pch=19, xlab="Fitted Values of Final Grade", ylab="Residual Values")
+# setting intercept and slope as 0,0
+abline(0, 0)
+
+```
+br()
+The residual vs. fitted plot above shows that while there is a random variation of points above and below zero, there is a fanning in the distribution of residuals, hence the condition of constant variance is not met.
+
+br()
+
+### Creating a Normal Plot using the qqnorm() function
+
+The block of code below plots a residual vs. Fitted graph which helps to assess whether the conditions of linearity and constant variance are met by our fitted model.
+
+```{r fig.cap="Fig. 3.2: Normal Plot of Residuals"}
+qqnorm(resids)
+qqline(resids)
+
+```
+
+br()
+
+The normal plot of residuals above does not follow a linear pattern. As such, the condition of normally distributed error is not met. This is further supported by the skewness of  QQ distribution in the histogram below.
+
+```{r fig.cap="Fig. 3.3: Normal distribution of Residuals"}
+hist(resids)
+```
+

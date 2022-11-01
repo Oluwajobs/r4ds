@@ -1,0 +1,28 @@
+---
+title: "Chapter 11"
+author: '''Joba Adisa'
+date: "2022-10-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# load libraries
+
+```{r}
+library(tidyverse)
+library(here)
+library(dataedu)
+library(tidytext)
+```
+
+## Import Data
+```{r}
+raw_tweet <- dataedu::tt_tweets
+
+# view data
+glimpse(raw_tweet)
+```
+

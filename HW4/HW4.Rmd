@@ -1,0 +1,294 @@
+---
+title: "Homework 4"
+author: '''Joba Adisa'
+date: "2022-10-14"
+output: html_document
+---
+
+### Introduction
+
+In this document I performed an aggregate data analysis of SC schools (with focus on racial distribution and students in poverty) using the 180-day active student headcounts dataset for the state of South Carolina. Analysis covered in this document include:
+
+
+- a bar graph of the percentage of student population for each subgroup in the data.
+- a histogram of the distribution of the percentage of white students at each school.
+- a bar graph of the percentage of each subgroup that attends a high poverty school.
+- a scatter plot of the percentage of students in poverty at a school versus the percentage of white students at that school.
+
+
+The sections that follow show each step of the analysis and the associated block of codes.
+<br/>
+
+### Set up
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)  # Effects global parameters for message and warnings.
+```
+
+
+<br/>
+**Load Libraries**
+
+
+The necessary packages needed for this assignment are: readxl, tidyverse, janitor and dataedu.
+
+```{r libraries}
+# Loading libraries
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(dataedu)
+```
+
+
+<br/>
+**Import Data**
+
+We will read in the data now using the {readxl} package and call it *schoool_data*. For this analysis we are not interested in regional differences, so we will exclude the charter and other schools by reading the data with a maximum row of  `n_max` = 1219 
+
+```{r data}
+school_data = read_excel("data/School Headcount by Gender, Ethnicity and Pupils in Poverty.xlsx",
+                skip = 6, n_max = 1219)
+```
+
+
+<br/>
+**Remove missing Data**
+
+
+Next we will need to tidy this data to make it ready for analysis. At the moment, the data contains some columns with missing rows, some variable names are also not descriptive while others are quite long. We will address this we will first use the `clean_names()` and `(remove_empty)` functions of the {janitor} package to make the column names tidy.
+
+```{r}
+
+# cleaning the names using the janitor package
+school_data <-  school_data %>% 
+  clean_names() %>% remove_empty(c("rows", "cols"))
+
+head(school_data)  # taking a quick peek into the data
+```
+
+
+
+We do not need the male, female, and two missing columns, hence we can drop them below and also rename the columns to more descriptive names.
+
+
+```{r}
+school_data <- school_data %>% select(-c(male, female, missing_7, missing_15)) %>% 
+  rename(school_id = x1, 
+         district = x2, 
+         school_name = x3, 
+         tot_student = x4, 
+         wh_num = white, 
+         aa_num = black_or_african_american,  # number of black or African American
+         hi_num = hispanic_or_latino,
+         pi_num = hawaiian_or_other_pacific_islander,
+         as_num = asian,
+         ai_num = american_indian,
+         mr_num = two_or_more_races,
+         pov_num = yes)
+
+```
+
+
+### Exercises:
+
+<br/>
+
+#### Exercise 1: Tidying and Transforming Data
+
+For the first exercise, we will be transforming our school_data data set to include the percentage of the student population that each subgroup comprises, the percentage of white students at each school, the percentage of students in poverty at each school,  and percentage of each subgroup that attends a high poverty school
+
+```{r}
+# claculating the percentage of the student population that each subgroup comprises
+school_data_tidy <- school_data %>% 
+  mutate(district = str_replace_all(district, "[:digit:]", "")) %>% 
+  mutate(district = tolower(trimws(district))) %>% 
+  mutate(wh_pct = wh_num / tot_student,   # calculates the percentage of White students in each school
+         aa_pct = aa_num / tot_student,   # calculates the percentage of African American students in each school
+         hi_pct = hi_num / tot_student,   # calculates the percentage of Hispanic students in each school
+         pi_pct = pi_num / tot_student,   # calculates the Pacific Islanders of white students in each school
+         as_pct = as_num / tot_student,   # calculates the percentage of Asian students in each school
+         ai_pct = ai_num / tot_student,   # calculates the percentage of American Indian students in each school
+         mr_pct = mr_num / tot_student,   # calculates the percentage of Mixed Race students in each school
+         # percentage of students in poverty in each school
+         pov_pct = pov_num / tot_student) # calculates the percentage of students in poverty in each school
+         
+```
+
+
+<br/>
+Calculating the percentage of each subgroup that attends a high poverty school (where high poverty is defined as a school where more than 75% of the students are in poverty). The `case_when()`function evaluates to TRUE if the value of `pov_pct` (that is, student in poverty) is > .75 for each of the specified subgroups. 
+
+
+```{r cases}
+school_data_5b <- school_data_tidy %>% 
+  # get cases where the condition evaluates to TRUE
+  mutate(
+    wh_povnum = case_when(pov_pct > .75 ~ wh_num),
+    aa_povnum = case_when(pov_pct > .75 ~ aa_num),
+    hi_povnum = case_when(pov_pct > .75 ~ hi_num),
+    pi_povnum = case_when(pov_pct > .75 ~ pi_num),
+    as_povnum = case_when(pov_pct > .75 ~ as_num),
+    ai_povnum = case_when(pov_pct > .75 ~ ai_num),
+    mr_povnum = case_when(pov_pct > .75 ~ mr_num),
+  ) %>%
+  # Returns the total for each numeric column. The "Total" is placed in the first column in our dataset. i.e. school_id
+  adorn_totals() %>% 
+  mutate(wh_pct = wh_num / tot_student, # percentage of white students in each school
+         aa_pct = aa_num / tot_student,
+         hi_pct = hi_num / tot_student,
+         pi_pct = pi_num / tot_student,
+         as_pct = as_num / tot_student,
+         ai_pct = ai_num / tot_student, 
+         mr_pct = mr_num / tot_student,
+         # percentage of students in poverty in each school
+         pov_pct = pov_num / tot_student, 
+         wh_povsch = wh_povnum / wh_num[which(school_id == "Total")],
+        aa_povsch = aa_povnum / aa_num[which(school_id == "Total")],
+        hi_povsch = hi_povnum / hi_num[which(school_id == "Total")],
+        pi_povsch = pi_povnum / pi_num[which(school_id == "Total")],
+        as_povsch = as_povnum / as_num[which(school_id == "Total")],
+        ai_povsch = ai_povnum / ai_num[which(school_id == "Total")],
+        mr_povsch = mr_povnum / mr_num[which(school_id == "Total")]) 
+
+```
+
+
+<br/>
+To facilitate the creation of plots later on, we will create a Long format of our data `pivot_longer()`
+
+```{r pivot}
+# Pivoting our plot
+school_longer_data <- school_data_5b %>%
+  select(-c(district, school_name)) %>% 
+  pivot_longer(cols = -matches("school_id"), names_to = "category", 
+               values_to = "value")
+```
+
+<br/>
+
+#### Exercise 2: Distribution of Percentage of Student Population by Subgroups
+
+Here, we will create a a bar graph of the percentage of the student population that each subgroup comprises.
+
+```{r plot_1, fig.cap="Figure 1: Percentage of Student Population by Subgroup"}
+school_longer_data %>% 
+  # Filter for Total rows, since we want district-level information
+  filter(school_id == "Total", 
+         str_detect(category, "pct"),
+         category != "pov_pct") %>% 
+  
+  # reordering x-axis so bars appears by descending value
+  ggplot(aes(x = reorder(category, -value), y=value)) +
+  geom_bar(stat = "identity", aes(fill = category)) + 
+  labs(title = "Percentage of Population by Subgroup", 
+       x = "Subgroup",
+       y = "Percentage of Population") +
+    
+  # Make labels more readable
+  scale_x_discrete(
+    labels = c(
+      "wh_pct" = "White",
+      "aa_pct" = "Black",
+      "hi_pct" = "Hispanic",
+      "as_pct" = "Asian",
+      "ai_pct" = "American Indians",
+      "pi_pct" = "Pacific Islander",
+      "mr_pct" = "Two or More Races"
+    )
+  ) +
+  # Make labels present as percentages
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_dataedu() +
+  theme_dataedu() +
+  theme(legend.position = "none")
+
+
+```
+
+The distribution reveals that White students comprise the highest percentage (around 48%) of student population in SC schools followed by students from Black communities (around31%). The distribution also contained a significant amount of variation and is rightly skewed due to the very small population of Asian, American Indians and Pacific Islander students at the tail of the graph. As such we can conclude that the population of SC schools students appears to be diverse.
+
+
+<br/>
+
+#### Exercise 3: Distribution of Percentage of White Students in Each School
+
+
+For this exercise, we will create a histogram of the distribution of the percentage of white students at each school in the SC dataset.
+
+```{r white_student, fig.cap="Figure 2: Percentage of White Student Population"}
+school_data_5b %>%
+# remove district totals
+  filter(school_id != "Total") %>% 
+  # X-axis will be % of White students within the school
+  ggplot(aes(x=wh_pct)) +
+  geom_histogram(breaks =seq(0, 1, by =.1),
+                 fill = dataedu_colors("darkblue")) +
+  labs(title = "Count of Schools by White Population",
+       x = "White Percentage", 
+       y = "Count") + 
+  scale_x_continuous(labels = scales::percent) +
+  theme(legend.position = "none") + 
+  theme_dataedu()
+```
+There is a good amount of variability in the distribution of White students in South Carolina schools. The distribution appear to be bimodal and a bit skewed to the right. At both ends of the graph, we see that a considerable amount of schools (around 150 schools) enroll 0-10% of White students population while a handful of schools also consisted of mostly White students only. This implies that even though the school district may be diverse, there is a good amount of variation in the distribution of subgroups across the schools. 
+
+<br/>
+
+#### Exercise 4: Distribution of Percentage of Each Subgroup Attending a High Poverty School
+
+
+For this exercise we will create a bar graph of the percentage of each subgroup of students that attends a high poverty school. 
+
+```{r pov, fig.cap="Figure 3: Percentage of Student Subgroups in High Poverty Schools"}
+
+school_longer_data %>% 
+  filter(school_id == "Total",
+         str_detect(category, "povsch")) %>% 
+  ggplot(aes(x = reorder(category, -value), y=value)) +
+  geom_bar(stat = "identity", aes(fill = factor(category))) + 
+  labs(title = "Distribution of Subgroups in High Poverty Schools", 
+       x = "Subgroup", y = "Percentage in High Poverty Schools") + 
+  scale_x_discrete(
+    labels = c(
+      "wh_povsch" = "White",
+      "aa_povsch" = "Black",
+      "hi_povsch" = "Hispanic",
+      "as_povsch" = "Asian",
+      "ai_povsch" = "American Indians",
+      "pi_povsch" = "Pacific Islander",
+      "mr_povsch" = "Two or More Races")) +
+  scale_y_continuous(labels = scales::percent) + 
+  scale_fill_dataedu() + 
+  theme_dataedu() + 
+  theme(legend.position = "none")
+```
+
+
+The distribution reveals that students from Black and American Indian communities tended to attend high poverty schools more compared to students from other races. On the flip side, the Asian subgroup have the lowest number of students attending high poverty schools followed by White students. We can conclude that non-White and non-Asian students are disproportionally attending high poverty schools. This could be due to a lot of factors such as population proportion - for example, there are actually fewer population of Asian students in the data however White students have a higher population overall yet they have fewer students attending high poverty schools. Another factor could be social economic status (SES) or geographic location. Additional analysis will need to be carried out to answer what the cause might be. 
+
+
+<br/>
+
+#### Exercise 5: Distribution of Percentage of Students Attending a High Poverty School vs Percentage of White Student
+
+
+For this exercise we will create a scatter plot to determine the correlation between the percentage of students in poverty at a school versus the percentage of white students at that school. 
+
+```{r scatter, fig.cap="Figure 4: Percentage of Student Attending a High Poverty School vs Percentage of White Student"}
+school_data_5b %>% 
+  filter(school_id != "Total") %>% 
+  ggplot(aes(x = wh_pct, y = pov_pct)) +
+  geom_point(color = dataedu_colors("turquoise")) + 
+  geom_smooth(method = 'lm', se = FALSE, colour = "red") +
+  labs(title = "Percentage of Students in Poverty vs. White Percentage",
+       x = "White Percentage",
+       y = "Percentage of Students in Poverty") + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(labels = scales::percent) +
+  theme_dataedu() +
+  theme(legend.position ="none")
+```
+<br/>  
+
+The scatter plot reveals that there is a strong negative correlation between the percentage of students attending a high poverty school and the percentage of White students in a school. That is, high poverty schools appear to have a lower percentage of White students and low poverty schools have a higher percentage of White students.

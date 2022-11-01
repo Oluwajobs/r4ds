@@ -1,0 +1,875 @@
+---
+title: "Homework 5"
+author: '''Joba Adisa'
+date: "2022-10-23"
+output: html_document
+---
+
+## Introduction
+
+
+The primary objective of my analysis in this study is to determine whether the data from the implementation of two instructional approaches (traditional vs conceptually rich curricula) provide any statistical evidence that the conceptually rich instructional approach leads to improvements in physics content knowledge, affect for science, and/or pedagogical content knowledge over time as compared to traditional lecture classes, among undergraduate non-physics majors. 
+
+
+The data used in this study were collected by Dr. Brooke Whitworth and colleagues as part of the first year of the NSF-funded grant _Building Content Knowledge of Elementary Teachers of Sciences_ (BuCKETS). This quasi-experiment included two undergraduate general physics classes: a control class (n = 19) where a traditional lecture style of instruction was used and a treatment class (n = 21) where a conceptually rich curriculum was used. Both classes were measured at three time points (pretest, posttest, and delayed post) on three different scales: (1) the Making Sense of Science Assessment (MSSA), (2) the _Preservice Elementary Teacher Affect Scale for Science_ (PETAS-S), and (3) a _pedagogical content knowledge_ (PCK) assessment.
+
+
+To do this, we will fit linear mixed effects models to assess the significance of the treatment and time effects and their interaction in predicting the mean scale scores. I will also be carrying out a missing data analysis, to investigate whether missingness of data could explain any significant difference obtained in the models. Lastly, I will consider whether the control and treatment groups are balanced on some potential confounding variables.
+
+
+This notebook is divided into 6 sections: The setup section, Section 1 (longitudinal analysis), Section 2 & 3 (focused on missing data analysis), Section 4 (investigated the possibility of confounding variables), and section 5 (where inferences are made based on the analysis in section 1-4)
+
+
+
+## Setup
+
+
+To carry out our analysis, we will need to install/load the necessary libraries. For my analysis, I have already installed the readxl, janitor, tidyverse, dataedu, nlme, emmeans, ggmosaic, and gridExtra packages and I will load them as shown in the chunk of code below:
+
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+## Load Packages
+library(tidyverse)
+library(janitor)
+library(readxl)
+library(dataedu)
+library(nlme)
+library(emmeans)
+library(ggmosaic)
+library(gridExtra)
+```
+
+
+
+*Read data:* 
+
+
+We can now read in the BuCKETS data using the `read_excel` functiion from the {readxl} package. The data is read into a variable named `buckets` as shown below:
+
+```{r data}
+# Load and Process the data
+buckets <-  read_excel("data/BuCKETS_DATA.xlsx")
+```
+
+
+
+*Cleaning and Tidying Data*
+
+
+Next we will use the `clean_names` function to create names that are easier to work with. Afterwards, we will process the data by dropping the MSSA subscale scores, converting all demographic information to character variables, re-labeling the demographic variable response options to align with the provided code book, and creating the race, in_state, and missing_dp variables. This is shown in the chunk of codes below:
+
+
+```{r cleaning}
+# Cleaning column names data
+buckets <- clean_names(buckets)
+names(buckets)
+```
+
+```{r processing}
+# Data Processing
+
+buckets <- buckets %>% 
+  # Dropping MSSA total Score
+  select(!starts_with(c("wav", "fm", "eg", "mtr")), -science_courses, -age) %>%
+  # converting the necessary columns to character type
+  mutate_at(vars(id_number:type_of_hs), ~as.character(.)) %>% 
+  # re-label the response options to align with the information provided in the code book for this data
+  mutate(treatment = if_else(treatment == "1", "treatment", "control")) %>% 
+  mutate(sex = if_else(sex == "1", "female", "male")) %>%
+  mutate(race = case_when(black == "1" ~ "Black",
+                          hispanic == "1" ~ "Hispanic",
+                          TRUE ~ "White")) %>%
+  # Re-labeling year to align with the codebook
+  mutate(year = case_when(year == "1" ~ "Freshman",
+                          year == "2" ~ "Sophomore",
+                          year == "3" ~ "Junior",
+                          TRUE ~ "Senior")) %>%
+  # Re-labeling majors to align with the code book
+  mutate(major = case_when(major == "0" ~ "Elementary Ed", 
+                           major == "1" ~ "Secondary Ed", 
+                           major == "2" ~ "Business", 
+                           major == "3" ~ "Music Ed", 
+                           major == "4" ~ "Accounting", 
+                           major == "5" ~ "Mathematics", 
+                           major == "6" ~ "Undeclared", 
+                           TRUE ~ "Social Work")) %>%
+  # identify as in sate if home state is "MS"
+  mutate(in_state = if_else(home_state == "MS", "yes", "no")) %>% 
+  # Re-labeling high school type to align with the code book
+  mutate(type_of_hs = if_else(type_of_hs == "0", "public", "private")) %>%
+  select(id_number, treatment, sex, race, year, major, in_state, type_of_hs, 
+         mssa_sum_pre:petas_s_sum_dp) %>%
+  mutate(missing_dp = if_else(is.na(mssa_sum_dp), "yes", "no"))
+
+```
+
+
+
+## Section 1: Longitudinal Analysis of the PCK scores
+
+
+**1a. Pivot PCK scores**
+
+
+In order to fit a linear mixed-effect model for the _PCK__ scores, we first need to create a data frame where PCK scores  have been pivoted to long format, with one column for time and another column for PCK scores.
+
+```{r pck}
+
+# create dataframe
+buckets_pck <- buckets %>% 
+  # pivot the pck scores(pre, post, dp) columns to longer format
+  pivot_longer(cols = starts_with("pck"),
+names_to = "time",
+values_to = "pck_score") %>%
+  # excluding the mssa and petas scores
+  select(!starts_with(c("mssa", "petas"))) %>%
+  # removing the pck_sum_ prefix using str_replace()
+  mutate(time = str_replace(time, "pck_sum_", ""))
+```
+
+
+
+**1b. Constructing Line plot of Mean PCK Scores over Time**
+
+
+Now I will construct a line plot to visualize the change in mean PCK score over time separately for each group (control and treatment). This would allow us to see the pattern the plot reveals about the change over time for each group.
+
+```{r plot, fig.cap="Fig. 1: Line Plot of Mean PCK Scores over Time"}
+# Creating line plot by treatment and control group
+buckets_pck %>% 
+  group_by(treatment, time) %>% 
+  summarize(mean_pck = mean(pck_score, na.rm = T)) %>% 
+  ggplot(aes(x = time, y = mean_pck, color = treatment)) + 
+  geom_line(aes(group = treatment), size = 1) + 
+  labs(title="Change in PCK Scores over Time By Treatment Group", x = "Time", y = "Mean PCK Score") +
+  geom_point(pch = 19) + theme_dataedu() + 
+  scale_x_discrete(limits = c("pre", "post", "dp"))
+```
+
+
+
+The plot reveals that the treatment group had a much higher mean PCK score than the control class at the pretest. The treatment group mean saw a change over time with a moderate increase from pretest to posttest and then a larger decline from posttest to delayed post. Conversely, the control class mean saw a larger increase from pretest to posttest, and then a smaller decline from posttest to delayed posttest.
+
+
+
+**1c. Fitting a linear mixed-effects model for the PCK scores**
+
+
+To determine whether the treatment and/or time are useful predictors of mean PCK scores for both groups, we will fit a linear mixed-effects model for the PCK scores with a subject-specific random effect and fixed effects for time, treatment, and their interaction 
+
+
+We will also request an ANOVA table for the fitted model.
+
+
+```{r}
+# Fitting a linear mixed-effect model for the PCK
+pck_lme <- lme(pck_score ~ treatment*time, 
+                data = buckets_pck, 
+                random = ~time | id_number,
+               # using na.omit for the na.action argument.
+                na.action = na.omit)
+
+# obtaining an ANOVA table for the fitted model
+anova(pck_lme)
+
+```
+
+From our ANOVA table above we can see that the treatment group is a significant predictor of the mean PCK score with a p-value of 0.0053. Whereas, the time variable and the treatment x time interaction term are not statistically significant (p-value > .05). This suggests that there might be some opportunities to refine our model. We will address this in the next subsection.
+
+
+**1d. Model Refinement**
+
+Keeping in mind the principle of hierarchy, we will refine the model until all remaining terms or predictors are statistically significant at the 5% level. 
+
+
+Since the treatment x time has the highest p-value (p-value = .6261) and is non-significant in our initial model above, we can remove it and reassess the significance of the two main effects (treatment and time)
+
+```{r}
+# refitting model with treatment and time main effects alone
+pck_lme.me <- lme(pck_score ~ treatment + time, 
+                  data = buckets_pck, 
+                  random = ~time | id_number, 
+                  na.action = na.omit)
+
+# obtaining an ANOVA table for the fitted model
+anova(pck_lme.me)
+```
+
+
+From our ANOVA table above we can see that the treatment group is a significant predictor of the mean PCK score with a p-value of 0.0046. However, the time variable is not statistically significant (p-value = .1550). Hence, we can remove the time predictor and refit the model with the treatment main effect only.
+
+
+```{r}
+# refitting model with treatment main effect alone
+pck_lme.trmt <- lme(pck_score ~ treatment, 
+                  data = buckets_pck, 
+                  random = ~time | id_number, 
+                  na.action = na.omit)
+
+# obtaining an ANOVA table for the fitted model
+anova(pck_lme.trmt)
+```
+
+Now, we have a final model where only the main effect of treatment is statistically significant. The contrast statement below reveals that the treatment group mean is significantly higher than the control mean.
+
+```{r confidence}
+#follow-up confidence interval 
+contrast(emmeans(pck_lme.trmt, "treatment"), 'tukey')
+```
+
+
+The very low p-value (0.0046) suggests that the significant difference in the mean PCK scores of both groups is associated with the type of treatment (curricula) they were engaged in. We will complete additional analysis in subsequent sections to see whether other factors might have influenced our result.
+
+
+
+## Section 2: Missing Data Analysis
+
+
+There were 8 students in this data set who did not have any delayed-post measurements. So far, we have chosen to omit the missing values in our analysis, which will still use all of the available information for these students, rather than remove these students and/or all delayed-post measurements from the analysis. The approach we used to handling the missing values is only warranted __if there is no pattern to the missingness.__ If certain characteristics of these students made them more or less likely to respond at the delayed-post time point, that would be a concern. 
+
+
+To check this assumption, we can compare the students who did and did not complete the scales at the delayed-post time point on all other variables in the dataset.
+
+
+The chunk of code below will create a mosaic plot comparing the distribution of students who were and were not missing delayed-post measurements across the treatment group assignments.
+
+```{r trmt_miss_plot, fig.cap= "Fig. 2.1: Distribution of Missing Data by Treatment Groups"}
+trmt_diff <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(missing_dp, treatment), fill = missing_dp)) + 
+  labs(title="Distribution of Missing DP across Treatment Groups") +
+  theme_dataedu()
+
+trmt_diff
+```
+
+
+
+The plot reveals that similar proportions of the students in the control and treatment groups did not complete the delayed-post measurements. To investigate further we can use the tabyl function of the janitor package to create a two-way table giving the number of students who did and did not complete the delayed-post measurements in each treatment group.
+
+
+```{r trmt_tway}
+trt_miss <- tabyl(buckets, treatment, missing_dp) 
+
+trt_miss
+
+```
+
+
+We could take this further by conducting a significance test to see if there is evidence of an association between missing delayed-post measurements and treatment group assignment. However, due to the small counts in the table (we need at least 10 in each cell) the theory-based chi-square test of association isn’t valid. We can instead use a nonparametric version of this test known as Fisher’s exact test. 
+
+```{r}
+fisher.test(trt_miss)
+```
+
+
+With a p-value of .6984, there is not much evidence of an association between treatment group assignment and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset. In the next subsections, we will carry out similar analysis for the remaining demographic variables in our BuCKETS data set in order to investigate whether any of the students characteristics and missing delayed-post measurements.
+
+
+**2a. Missing Data Analysis of Demographics**
+
+
+For each of the six remaining demographic variables in the buckets data frame – sex, race, year, major, in_state, type_of_hs – we will create a mosaic plot comparing the distribution of students who were and were not missing delayed-post measurements across the different groups defined by the variable. 
+
+
+Next, we will use the grid.arrange function of the gridExtra package to arrange the mosaic plots in 3 rows.
+
+```{r missing_data, fig.cap= "Fig. 2.2: Distributions of Missing Data by Demographic Data"}
+# distribution of missing dp across sex
+sex_diff <-  buckets %>% 
+  ggplot() +
+  geom_mosaic(aes(x = product(missing_dp, sex), 
+                  fill= missing_dp)) + 
+  labs(title="Distribution of Missing DP across Sex Groups") +
+  theme_dataedu()
+
+# distribution of missing dp across race
+race_diff <-  buckets %>% 
+  ggplot() +
+  geom_mosaic(aes(x = product(missing_dp, race), 
+                  fill= missing_dp)) + 
+labs(title="Distribution of Missing DP across Raciel Groups") +
+  theme_dataedu()  +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0, size=12))
+
+# distribution of missing dp across year
+year_diff <-  buckets %>% 
+  ggplot() +
+  geom_mosaic(aes(x = product(missing_dp, year), 
+                  fill= missing_dp)) + 
+labs(title="Distribution of Missing DP across Year Groups") +
+  theme_dataedu()  +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0, size=12))
+
+# distribution of missing dp across majors
+major_diff <-  buckets %>% 
+  ggplot() +
+  geom_mosaic(aes(x = product(missing_dp, major), 
+                  fill= missing_dp)) + 
+labs(title="Distribution of Missing DP across Majors") +
+  theme_dataedu()  +
+  theme(axis.text.x=element_text(angle = -90, hjust = 0, size=12))
+
+# distribution of missing dp across states
+state_diff <-  buckets %>% 
+  ggplot() +
+  geom_mosaic(aes(x = product(missing_dp, in_state), 
+                  fill= missing_dp)) + 
+labs(title="Distribution of Missing DP across States") +
+  theme_dataedu() 
+
+# distribution of missing dp across high school type
+hs_diff <-  buckets %>% 
+  ggplot() +
+  geom_mosaic(aes(x = product(missing_dp, type_of_hs), 
+                  fill= missing_dp)) + 
+labs(title="Distribution of Missing DP across Type of High School") +
+  theme_dataedu()
+
+
+# arranging plots in a grid
+grid.arrange(sex_diff, race_diff, year_diff, major_diff, state_diff, hs_diff, nrow = 3)
+```
+
+
+The plot above reveals the following about students demographics and patterns of missingness in the data:
+
+
+1. Similar proportion of female and male students did not complete the delayed-post measurements suggesting that there is likely no significant association between students' sexes and missing delayed-post measurements.
+
+2. Similar proportion of White and Black students did not complete the delayed-post measurements, while the number appears to be very small for Hispanic students, it could be due to the population distribution of students in this group. As such, there is likely no significant association between students' race and missing delayed-post measurements.
+
+3. Similar proportion of Freshman, Junior, and Sophomore students did not complete the delayed-post measurements, whereas the number appears to be very small for students in their senior year students. This could be due to the population distribution of senior students in this group. The distribution however suggests that there is likely no significant association between students' year in the program and missing delayed-post measurements. Further analysis would help confirm or negate this.
+
+4. Similar proportion of Elementary, Secondary Ed., and Business majors did not complete the delayed-post measurements. Similarly, a similar proportion of Accounting, Mathematics, Music Ed., Social Work and other students with undeclared major did not complete the delayed post-test (although their number is smaller compared to the former group). However, the similar distributions across these groups suggests there is likely no significant association between students' major and missing delayed-post measurements.
+
+5. There is a larger proportion of out-of-state students with missing delayed-post measurements compared to their in-state counterparts. Yet, the difference does not appear to be exponentially high enough to cause a pattern in students' missingness of delayed-post tests measurement. It would however, be worth conducting further analysis on this.
+
+6. Similar proportion of public and private students did not complete the delayed-post measurements suggesting that there is likely no significant association between type of high school and missing delayed-post measurements.
+
+
+
+To further investigate whether there is a pattern between any of the demographic data and missingness of delayed-post measurements, we will create a two-way table giving the number of students who did and did not complete the delayed-post measurements in each group. This is addressed in **2b** below:
+
+
+
+**2b. Two-way Table and Test of Association**
+
+
+For each of these six remaining demographic variables in our BuCKETS dataset, we will use the `tabyl` function on the {janitor} package to  construct a two-way table giving the number of students who did and did not complete the delayed-post measurements in each group defined by the variable. 
+
+
+Based on the result of the table, we will use either the `chisq.test` or the `fisher.test` function of the {janitor} package to conduct a test of association. If we have up to 10 observations in each group, we will use the chi-square test, otherwise, we will use the fisher's non-parametric test of association in cases where one or more groups have less than 10 observations.
+
+
+**Sex**
+
+```{r}
+# Two-way table based on sex vs missing dp
+sex_miss <- tabyl(buckets, sex, missing_dp)
+
+sex_miss
+```
+
+Since we do not have up to 10 observations in all the groups, we will use the Fisher's test of association to further investigate whether students' sex has any association with missing delayed post measurements.
+
+```{r}
+# test of association sex vs missing dp 
+fisher.test(sex_miss)
+```
+
+With a p-value of 1.000, there is not much evidence of an association between students' sex and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+**Race**
+
+```{r}
+# Two-way table based on race vs missing dp
+race_miss <- tabyl(buckets, race, missing_dp)
+
+race_miss
+```
+
+
+Since we do not have up to 10 observations in all the groups, we will use the Fisher's test of association to further investigate whether students' race has any association with missing delayed post measurements.
+
+```{r}
+
+fisher.test(race_miss)
+```
+
+With a p-value of 1, there is not much evidence of an association between students' race and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+**Year**
+
+```{r}
+# Two-way table based on year vs missing dp
+year_miss <- tabyl(buckets, year, missing_dp)
+
+year_miss
+```
+
+
+Since we do not have up to 10 observations in all the groups, we will use the Fisher's test of association to further investigate whether students' year in the program has any association with missing delayed post measurements.
+
+```{r}
+# test of association year vs missing dp 
+
+fisher.test(year_miss)
+```
+
+With a p-value of 1.000, there is not much evidence of an association between students' year in the program and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+**Major**
+
+```{r}
+# Two-way table based on major vs missing dp
+major_miss <- tabyl(buckets, major, missing_dp)
+
+major_miss
+```
+
+
+Since we do not have up to 10 observations in all the groups, we will use the Fisher's test of association to further investigate whether students' major has any association with missing delayed post measurements.
+
+```{r}
+# test of association major vs missing dp 
+
+fisher.test(major_miss)
+
+```
+
+
+With a p-value of 1.000, there is not much evidence of an association between students' major and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+**In State**
+
+```{r}
+# Two-way table based on in/out state vs missing dp
+state_miss <- tabyl(buckets, in_state, missing_dp)
+
+state_miss
+```
+
+
+Since we do not have up to 10 observations in all the groups, we will use the Fisher's test of association to further investigate whether being an in-state or out-of-state student has any association with missing delayed post measurements.
+
+```{r}
+# test of association in/out state vs missing dp 
+
+fisher.test(state_miss)
+```
+
+
+With a p-value of .2351, there is not much evidence of an association between students in or out-of-state status and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+**Type of HS**
+
+```{r}
+# Two-way table based on hs vs missing dp
+hs_miss <- tabyl(buckets, type_of_hs, missing_dp)
+
+hs_miss
+```
+
+
+Since we do not have up to 10 observations in all the groups, we will use the Fisher's test of association to further investigate whether type of high school has any association with missing delayed post measurements.
+
+
+```{r}
+# test of association hs vs missing dp 
+
+fisher.test(hs_miss)
+```
+
+
+With a p-value of 1.000, there is not much evidence of an association between high school type and missing delayed-post measurements, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+
+
+## Section 3
+
+
+As an additional check on the missing data assumptions that were made, the students who were and were not missing delayed-post measurements can be compared on each of the scale scores. For example, the following code will create side-by-side boxplots comparing the distribution of MSSA pre-test scores among the students who were and were not missing delayed-post measurements
+
+```{r fig.cap= "Fig 3.1: Distibution of MSSA Pre Test Scores by Missing DP"}
+mss_pre_plot <- buckets %>% 
+  ggplot(aes(x = mssa_sum_pre, y = missing_dp, fill = missing_dp)) +
+  geom_boxplot() +
+   labs(title="Distibution of MSSA Pre Test Scores by Missing DP") +
+  theme_dataedu()
+
+mss_pre_plot
+```
+
+
+The boxplots reveal that the missing data group had a slightly lower median MSSA pre-test score than the group who completed all measurements. We could conduct a significance test to see if the mean difference (on MSSA pre-test score) between the groups is statistically significant. Though the missing data group is small (n = 8), the boxplots do not reveal strong skewness such that use of the theory-based two-sample t-test should be permissible.
+
+
+```{r}
+# conducting a 2 sample t-test between the missing dp group and those who did not miss dp
+t.test(mssa_sum_pre ~ missing_dp, data = buckets)
+```
+
+
+With a p-value of .3308, there is not much evidence of a difference in mean MSSA pre-test scores for the missing data groups, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+**3a. Side by Side Box Plot** 
+
+
+For each of the five remaining pre-test and post-test scores in the buckets data frame –mssa_sum_post, petas_s_sum_pre, petas_s_sum_post, pck_sum_pre, pck_sum_post – we will create a side-by-side boxplots comparing the distribution of scores among students who were and were not missing delayed-post measurements. Use the grid.arrange function of the gridExtra package to arrange the box plots in 3 rows. Comment on any potential associations. 
+
+
+```{r fig.cap="Fig. 3.2: Plots of Mean Pre-test and Post-test Scores by Missing DP Group"}
+# mssa_sum_post box plot
+mss_post_plot <-  buckets %>% 
+  ggplot(aes(x = mssa_sum_post, y = missing_dp, fill = missing_dp)) +
+  geom_boxplot() +
+  labs(title="Distibution of MSSA Post Test Scores by Missing DP") +
+  theme_dataedu()
+
+# petas_sum_pre box plot
+petas_pre_plot <-  buckets %>% 
+  ggplot(aes(x = petas_s_sum_pre, y = missing_dp, fill = missing_dp)) +
+  geom_boxplot() +
+  labs(title="Distibution of PETAS Pre Test Scores by Missing DP") +
+  theme_dataedu()
+
+# petas_sum_post box plot
+petas_post_plot <- buckets %>% 
+  ggplot(aes(x = petas_s_sum_post, y = missing_dp, fill = missing_dp)) +
+  geom_boxplot() +
+  labs(title="Distibution of PETAS Post Test Scores by Missing DP") +
+  theme_dataedu()
+
+# pck_sum_pre box plot
+pck_pre_plot <-  buckets %>% 
+  ggplot(aes(x = pck_sum_pre, y = missing_dp, fill = missing_dp)) +
+  geom_boxplot() +
+  labs(title="Distibution of PCK Pre Test Scores by Missing DP") +
+  theme_dataedu()
+
+# pck_sum_post box plot
+pck_post_plot <-  buckets %>% 
+  ggplot(aes(x = pck_sum_post, y = missing_dp, fill = missing_dp)) +
+  geom_boxplot() +
+  labs(title="Distibution of PCK Post Test Scores by Missing DP") +
+  theme_dataedu()
+
+
+# arranging in a grid
+# I added the MSSA pre test score plot to make sure we have a 3 x 2 plot
+grid.arrange(mss_pre_plot, mss_post_plot, petas_pre_plot, petas_post_plot, pck_pre_plot, pck_post_plot)
+```
+
+
+
+The Box Plots of Mean Pre-test and Post-test Scores by Missing DP Grouping above reveals the following:
+
+1. MSSA pre-test: The missing data group had a slightly lower median MSSA pre-test score than the group who completed all measurements.
+
+2. MSSA post-test: There is no significant difference between the median MSSA post-test score of the missing data group and the group who completed all measurements.
+
+3. PETAS pre-test: The missing data group had a slightly higher median PETAS pre-test score than the group that completed all measurements.
+
+4. PETAS post-test: The missing data group had a significantly lower median PETAS post-test score than the group that completed all measurements.
+
+5. PCK pre-test: The missing data group had lower median PCK pre-test score than the group that completed all measurements.
+
+6. PCK post-test: Even though the missing data group had lower PCK pre-test scores, there was no significant difference between the median PCK post-test score of the missing data group and the group who completed all measurements.
+
+
+
+**3b. Two Sample t-test**
+
+
+For each of the five remaining pre-test and post-test scores, conduct a two-sample t-test to see if the mean difference in scores between the students who were and were not missing delayed-post measurements is statistically significant. Comment on what the p-values reveal about the strength of evidence for any associations and what this says about the missing data assumptions that were made in the longitudinal analysis.
+
+
+```{r}
+# mean diff between the groups based on mssa_post
+test_ms_post <-  t.test(mssa_sum_post ~ missing_dp, data = buckets)
+
+test_ms_post
+```
+
+
+With a p-value of .8205, there is not much evidence of a difference in mean MSSA post-test scores for the missing data groups, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+```{r}
+# mean diff between the groups based on petas_pre
+test_petas_pre <-  t.test(petas_s_sum_pre ~ missing_dp, data = buckets)
+test_petas_pre
+```
+
+
+With a p-value of .9315, there is not much evidence of a difference in mean PETAS pre-test scores for the missing data groups, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+```{r}
+# mean diff between the groups based on petas_post
+test_petas_post <-  t.test(petas_s_sum_post ~ missing_dp, data = buckets)
+test_petas_post
+```
+
+
+With a p-value of .1917, there is not much evidence of a difference in mean PETAS post-test scores for the missing data groups, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+```{r}
+# mean diff in pck_pre scores for both groups
+test_pck_pre <-  t.test(pck_sum_pre ~ missing_dp, data = buckets)
+test_pck_pre
+```
+
+
+A very low p-value of .01898, suggests that there is a significant difference in the mean PCK pre-test scores for the missing data groups. This negates the assumption that there is no pattern to the missingness in the dataset and suggests that certain characteristics of students in the missing data groups might be responsible for observed difference.
+
+
+```{r}
+# mean diff in pck_post scores for both groups
+test_pck_post <-  t.test(pck_sum_post ~ missing_dp, data = buckets)
+test_pck_post
+```
+
+With a p-value of .68, there is not much evidence of a difference in mean PCK post-test scores for the missing data groups, which supports the assumption that there is no pattern to the missingness in the dataset.
+
+
+
+## Section 4
+
+It is important to note that this study was a quasi-experiment because even though treatments were imposed, they were not assigned to the students at random. _In such cases, we would like to see that the two treatment groups are balanced with respect to all variables that could potentially influence the response._ For example, the following code compares the control and treatment groups on their distribution of the sexes.
+
+```{r fig.cap= "Fig. 4.1: Distributions of Treatment Groups by Sex"}
+# comparison of treatment by sex
+trt_sex_plot <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(sex, treatment), fill = sex)) + 
+  theme_dataedu()
+
+trt_sex_plot
+```
+
+The plot reveals an issue – the treatment group is composed of all females but the control group has more of a balance of males and females. Thus, it is not possible to determine if differences observed in the responses are due to the treatments imposed or the sex of the students. For example, males could be inherently worse at pedagogical content knowledge than females, so the significantly lower PCK scores at pre-test for the control group could be due to the fact that this group contains so many males and not because of the treatment. This suggests that students sex is a possible confounding variable.
+
+
+The following codes also creates a two-way tabyl and conducts an exact test for the association between sex and treatment group assignment.
+
+
+```{r}
+trt_sex <- tabyl(buckets, treatment, sex) 
+
+trt_sex
+
+fisher.test(trt_sex)
+```
+
+Not surprisingly, the p-value of .00098 provides strong evidence of an association between sex and treatment group assignment.
+
+We will carry out the same process for the remaining demographic data in our study to see whether any of the other students characteristics are possible variables that might confound the observed difference in the treatment groups. This is addressed in __4b__ below.
+
+
+
+**4b. Mosaic plot comparing the distribution of treatment groups based on demographics**
+
+For each of the five remaining demographic variables in the buckets data frame – race, year, major, in_state, type_of_hs – we will create a mosaic plot comparing the distribution of the groups defined by the variable between the control and treatment groups. Use the grid.arrange function of the gridExtra package to arrange the mosaic plots in 3 rows. Comment on any potential associations.
+
+
+```{r "Fig. 4.2: Distributions of Treatment Groups by Demographics"}
+# treatment by sex
+trt_race_plot <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(race, treatment), fill = race)) + 
+  theme_dataedu()
+
+# treatment by year
+trt_year_plot <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(year, treatment), fill = year)) + 
+  theme_dataedu()
+
+# treatment by major
+trt_major_plot <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(major, treatment), fill = major)) + 
+  theme_dataedu()
+
+# treatment by in_state
+trt_state_plot <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(in_state, treatment), fill = in_state)) + 
+  theme_dataedu()
+
+# treatment by type_of_hs
+trt_hs_plot <- ggplot(data = buckets) + 
+  geom_mosaic(aes(x = product(type_of_hs, treatment), fill = type_of_hs)) + 
+  theme_dataedu()
+
+
+# arranging in a grid
+grid.arrange(trt_sex_plot, trt_race_plot, trt_year_plot, trt_major_plot, trt_state_plot, trt_hs_plot, nrow=3)
+```
+
+
+
+The plot reveals the following:
+
+1. Race: There are similarities in the distribution of race between the control and treatment groups suggesting that the difference in the response of the two groups is likely not due to race
+
+
+2. Year: There are similarities in the distribution of Freshman, Junior, Senior and Sophomore students between the treatment and control group, suggesting that the difference in the response of the two groups is likely not due to students' year.
+
+
+3.Major: The control group had a good balance of students from different majors, whereas the treatment group is composed of all Elementary Education students. This raises an issue. For example, Elementary Education students could inherently have better PCK knowledge than students in other majors, so the significantly higher mean PCK pre-test scores for the treatment group could be due to the fact that this group contains so many Elementary Education students than the control group. Thus, it is not possible to determine if differences observed in the responses are due to the treatments imposed or the major of the students.
+
+4. In State or Not: There are similarities in the distribution of in and out-of-state between the control and treatment groups suggesting that the difference in the response of the two groups is likely not due to whether students are in/out of state students.
+
+5. Type of high school: There are similarities in the distribution of public and private high school students between the control and treatment groups, suggesting that the difference in the response of the two groups is likely not due to type of school
+
+
+
+**4b. Two Way Table and Test of Association**
+
+
+For each of the five remaining demographic variables, we will construct a two-way tabyl giving the number of students who were in the treatment and control groups for each group defined by the variable.
+
+Again, based on the result of the table, we will use either the `chisq.test` or the `fisher.test` function of the {janitor} package to conduct a test of association. If we have up to 10 observations in each group, we will use the chi-square test, otherwise, we will use the fisher's non-parametric test of association in cases where one or more groups have less than 10 observations.
+
+```{r}
+# 2 way table of treatment by race
+trt_race <- tabyl(buckets, treatment, race) 
+
+trt_race
+```
+
+
+We will conduct a fisher's test of association since we do not have up to 10 units in all groups.
+
+
+```{r}
+# Fisher non-parametric  Test
+fisher.test(trt_race)
+```
+
+
+With a p-value of 1, there is not much evidence of an association between treatment assignment and race.
+
+
+```{r}
+# 2 way table of treatment by year
+trt_year <- tabyl(buckets, treatment, year) 
+
+trt_year
+```
+
+
+We will conduct a fisher's test of association since we do not have up to 10 units in all groups.
+
+
+```{r}
+# Fisher test 
+fisher.test(trt_year)
+```
+
+
+With a p-value of .4406, there is not much evidence of an association between treatment assignment and students year in the program.
+
+
+
+```{r}
+# 2 way table of treatment by major
+trt_major <- tabyl(buckets, treatment, major) 
+
+trt_major
+```
+
+
+We will conduct a fisher's test of association since we do not have up to 10 units in all groups.
+
+
+
+```{r}
+# Fisher test 
+fisher.test(trt_major)
+```
+
+
+A very low p-value of 0.00000009636 indicates a significant association between students' major and treatment group assignment.
+
+
+
+```{r}
+# 2 way table of treatment by in/out state
+trt_state <- tabyl(buckets, treatment, in_state) 
+
+trt_state
+```
+
+
+We will conduct a fisher's test of association since we do not have up to 10 units in all groups.
+
+
+
+```{r}
+# Fisher test 
+fisher.test(trt_state)
+```
+
+
+With a p-value of .4727, there is not much evidence of an association between treatment assignment and whether students were in state or out of state.
+
+
+
+```{r}
+# 2 way table of treatment by type of hs
+trt_hs <- tabyl(buckets, treatment, type_of_hs) 
+
+trt_hs
+```
+
+
+We will conduct a fisher's test of association since we do not have up to 10 units in all groups.
+
+
+
+```{r}
+# Fisher test 
+fisher.test(trt_hs)
+```
+
+
+With a p-value of .4727, there is not much evidence of an association between treatment assignment and type of school.
+
+
+
+
+## Section 5: Potential Explanations
+
+
+In this section we would like to understand What from the comparison of the control and treatment groups in exercise 4 might explain the drastic difference in PCK (pedagogical content knowledge) between the two groups at pre-test.
+
+Similarly, we also want to understand what from the missing data analysis in exercise 3 might explain the dramatic drop in PCK scores from post-test to delayed-post for the treatment group?
+
+These are addressed in _5a and 5b_ below:
+
+
+
+**5a: Potential Factors Responsible for Drastic Difference in Mean PCK Pre-test Scores For Between Treatment Groups**
+
+
+From section 4 above, we saw that there was a statistically significant association between students sex and treatment groups, as well as students major and treatment groups for the mean PCK pre-test between the groups. 
+
+This associations suggests that _sex_ and _major_ are confounding variables that may be responsible for the observed difference in the response of the treatment groups. For example, males could be inherently worse at pedagogical content knowledge than females, so the significantly lower PCK scores at pre-test for the control group could be due to the fact that this group contains more males and not because of the treatment. Similarly, Elementary Education students could inherently have better PCK knowledge than students in other majors, so the significantly higher mean PCK pre-test scores for the treatment group could be due to the fact that this group primarily consisted of Elementary Education students.
+
+
+
+In sum, it is difficult for us to determine if differences observed in the responses are due to the treatments imposed or the sex and/or major of the students.
+
+
+
+
+**5b. Explaining Drop in Treatment Group PCK Scores From Post-Test to Delayed-Post Measurement**
+
+
+From section 3 above, we observed that there was a significant difference (p-value = 0.01898) in the mean PCK pre-test scores of students who did not complete the delayed post measurements and those who completed all the measurements. This suggests that there was actually a pattern to missingness of data in the study. Students who completed all measurements actually had higher pre-test scores. Since there are fewer students with missing data in the control group while those with more missing data (and lower pre-test mean score) ended up being in the treatment group (see figure 2.1), then we are likely to witness the kind of drastic decline from post-test to delayed post-test in the treatment group.
+

@@ -1,0 +1,84 @@
+---
+title: "Lab 4"
+author: "'Joba Adisa"
+date: "2022-09-19"
+output: html_document
+---
+
+## Setup and Loading Packages
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dataedu)
+library(sjPlot)
+library(tidyverse)
+```
+
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see [R Markdown Studio](http://rmarkdown.rstudio.com).
+
+## Reading data
+
+Reading the dat.csv data file from the data folder in the project
+
+```{r}
+dat <-  read_csv("data/dat.csv")
+```
+
+## Example Bar Charts in {ggplot}
+Here is a {ggplot2} example using a dataset of school mean test scores to graph a bar chart:
+
+```{r fig7.1, fig.cap = "Figure 7.1 Example Plot"}
+# create fake data
+students <- tibble(school_id=c("a", "b", "c"), mean_score=c(10, 20, 30))
+
+# create a bar chart
+students %>%
+  # creating a ggplot
+  ggplot(aes(x=school_id, y = mean_score)) +
+  # layering and specifying type of plot
+  geom_bar(stat="identity", fill = dataedu_colors("darkblue")) +
+  # applying theme_dataedu
+  theme_dataedu() +
+  # making all fonts in the chart size 24
+  theme(text = element_text(size=24))
+
+```
+
+***
+
+## Final Grade vs Time Spent on Course
+The plot below depicts the relationship between the time spent in the course LMS (in minutes) and final course grade for the 603 online science course students in the dataset.
+
+```{r fig7.3, fig.cap = "Figure 7.3 Final Grade vs. Time Spent with LSRL", message=FALSE, warning=FALSE}
+# Scatterplot with LSRL
+dat %>% 
+  ggplot(aes(x=TimeSpent, y=final_grade)) +
+  geom_point(color=dataedu_colors("green")) +
+  geom_smooth(method = "lm") +
+  theme_dataedu() +
+  labs(x = "Time Spent", y = "Final Grade") +
+  theme(text = element_text(size=24))
+
+```
+
+<br/>
+## Linear Model predicting Final Grade based on Time Spent
+
+$$
+final\_grade = \beta_0 + \beta_1(TimeSpent) + \epsilon
+$$
+
+The table below summarizes the liner model to predict students' final grades from their time spent on the course.
+
+```{r table7.1}
+# fitting the linear model
+m_linear <- lm(final_grade ~ TimeSpent, data = dat)
+
+# creating a table that summarizes the linear model output
+tab_model(m_linear, title = "Table 7.1")
+```
+
+<br/>
+The table above showed that TimeSpent is a significant predictor of final_grade (p-value < 0.001), for every extra minute a student spend in the course their grade increases by 0.01 unit.
+

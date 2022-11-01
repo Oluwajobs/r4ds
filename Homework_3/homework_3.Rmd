@@ -1,0 +1,262 @@
+---
+title: "Homework 3"
+author: '''Joba Adisa'
+date: "2022-10-02"
+output: html_document
+---
+
+--------------------------------------------------------------------------------------
+Credit
+
+This assignment is completed using R Markdown. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see [RStudio](http://rmarkdown.rstudio.com).
+--------------------------------------------------------------------------------------
+
+
+## Environment and Data Setup
+
+```{r setup, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+
+### Loading Libraries
+
+```{r libraries}
+library(readxl) # for reading excel files
+library(tidyverse)
+library(janitor)  # for cleaning df with clean_names()
+library(dataedu)
+library(GGally) # ggplot extension that reduces the complexity of combining geometric objects and transformed data
+library(sjPlot)  # for plotting and customizing plot appearance
+library(plotly)
+```
+
+
+### Reading Data using 
+
+To read the gradebook data, we will be using the read_excel() function from the {readxl} package
+
+```{r initial_exploration, fig.cap= "Plot of data types in the gradebook dataset"}
+# opens sheet 1 of the spreadsheet starting from row 10
+ExcelGradeBook <- read_excel("data/ExcelGradeBook.xlsx", sheet = 1, skip = 10)
+
+# renaming our dataframe
+gradebook <- ExcelGradeBook
+
+# inspecting the data frame
+visdat::vis_dat(gradebook)  # gives visual representation of the data types in the data set
+```
+
+### Process Data
+
+
+In this section, we are cleaning the column or variable names in our dataset to make them tidy. That is, we are removing special characters and spaces in the columns names. First, we will explore what our variable names look like:
+
+<br>
+**Initial Exploration of Data**
+
+```{r exploration}
+# Initial exploration of data
+head(gradebook)
+```
+
+<br>
+Results from a quick preview of the dat shows that some variable names in the dataset infact contain spaces. The spaces are removed using the `clean_names()` function from the {janitor} package, as shown below
+
+```{r data_cleaning}
+# Modifying the columns names to remove spaces and replace with underscore "_"
+gradebook <- clean_names(gradebook)
+
+# Exploring the cleaned data
+head(colnames(gradebook))
+
+# viewing the data: this opens a new data view pane.
+# uncomment to run
+# view(gradebook)
+
+```
+
+
+Viewing the data shows that there are some columns like Financial_Status, repeated_grades, age, gender, etc, that contain missing values. We can remove these variables using the `remove_empty()` function in the {janitor} package.
+
+```{r remove_empty}
+# removing rows with missing data
+gradebook <- remove_empty(gradebook, c("rows", "cols"))
+
+# removing the absent and late columns
+gradebook <- 
+  gradebook %>% 
+  select(-c(absent, late))
+```
+
+### Creating a New Dataframe of Averages
+
+Create a dataset called gradebook_avgs that contains only the columns with the gradebook category averages: running_average, homeworks, classworks, formative_assessments, projects, summative_assessments.
+
+```{r gradebook_avg}
+# Create a new dataframe of averages from the Grade dataset
+gradebook_avg <- 
+  gradebook %>% 
+  select(running_average, homeworks, 
+         classworks, formative_assessments,
+         projects, summative_assessments)
+
+# inspect data
+glimpse(gradebook_avg)
+```
+
+
+
+### Exercise 1: Comparing Scores Across Each Gradebook Categories
+
+**1.1. Create a boxplot of scores separately for each gradebook category, excluding running_average**
+<br>
+
+To create this visualization, the gradebook_avg is pivoted from its wide format to a new dataset *gradebook_long_avg* that is in a long format using the `pivot_longer()` function. 
+
+```{r pivot}
+# Converting our data set to a long format
+gradebook_long_avg <- 
+  gradebook_avg %>% 
+  pivot_longer(everything(), 
+               names_to = "category",
+               values_to = "average_score")
+
+# inspecting the data
+glimpse(gradebook_long_avg)
+```
+
+<br>
+A boxplot for the pivoted data is plotted as shown below.
+
+```{r boxplot, fig.cap="Fig. 1.1 Boxplot of Average Scores by Categories"}
+# create a boxplot of scores for each grade book category
+gradebook_long_avg %>% 
+  filter(category != "running_average") %>% 
+  ggplot(aes(x=category,
+             y = average_score,
+             fill = category)) +
+  geom_boxplot(fill=dataedu_colors()) +
+  # labeling the plot
+  labs(title="Distribution of Assessment Average Scores",
+       x = "Assessment Category",
+       y = "Average Scores") + 
+  theme_dataedu() +  # using theme dataedu
+    # scale_fill_dataedu() +
+  theme(
+    # remove legend
+    legend.position = "none",
+    # angles the x axis labels
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    #increase text for readability
+    text = element_text(size = 20)
+  )
+```
+
+<br>
+**1.2. Data Summary**
+<br>
+
+The summary (mean, median, IQR, standard deviation, minimum, and maximum) of each gradebook category is shown below using the sammarise() function.
+
+```{r summary}
+# determining the summary stat
+gradebook_long_avg %>% 
+  group_by(category) %>% 
+  summarise("Minimun" = min(average_score),
+            "Median" = median(average_score),
+            "Maximum" = max(average_score),
+            "IQR" = IQR(average_score),
+            "Mean" = mean(average_score),
+            "SD" = sd(average_score))
+```
+<br>
+
+**1.3. Summary**
+<br>
+
+From the graph and data summary above, we observe that there is greater variability for the homework and summative assessment scores. The summative assessment scores also have an outlier which appears to be the minimum score in this grade category. 
+
+
+## Exercise 2
+
+**2.1. Scatterplot Matrix using ggpairs**
+
+<br>
+
+A scatterplot matrix of all variables in the dataset and their corresponding correlation to each other is displayed below.
+
+```{r plot_matrix, fig.cap="Fig. 2.1: Scatterplot Matrix of Gradebook Assessment Averages"}
+
+gradebook_avg %>% 
+  ggpairs(title = "Scatterplot Matrix of Students' Assessment Average Scores",
+          columnLabels = c("Running Avg.", "Homeworks", "Classworks", "Form. Assessment", "Projects", "Sum. Assessment")) +
+  theme_dataedu() +
+  theme(strip.text.x = element_text(size = 12),
+           strip.text.y = element_text(size = 12),
+        text=element_text(size=24))
+  
+```
+
+From the distribution matrix above, summative assessment has the strongest linear relationship with running_average, with the correlation coefficient = .765.
+
+
+### Exercise 3: Predicting running_average using summative_assessments
+
+
+**Fitted Model:**
+
+$$
+\hat{running\_average} = \hat\beta_0 + \hat\beta_1(summative\_assessments) + \epsilon
+$$
+
+```{r model, fig.cap = "Fitted Model Predicting Final Course Average by Summ. Assessment"}
+model_0 <-lm(running_average ~ summative_assessments, data = gradebook_avg)
+# model_0_summary <- summary(model_0)
+
+
+# Displaying a summary of the fitted model
+tab_model(model_0, title = "Table 1: Summary of Fitted Model")
+```
+
+**Interpretation of Fitted Model**
+<br>
+
+From Table 1 above, we can conclude that every additional unit of increase in students' summative assessment score, will likely lead to an increase of 0.35 in their final course average score.
+
+```{r resid_fit_plot, fig.cap="Fig. 3.1: Residual vs. Fitted Plot of Final Course Average"}
+# Creating a residual
+resids = resid(model_0)
+
+# creating fitted values
+fits = fitted(model_0)
+
+# plotting 
+plot(fits, resids,
+     pch=19,
+     main = "Residual vs. Fitted Plot of Final Course Average",
+     xlab="Fitted Values of Running Average Scores",
+     ylab="Residuals of Running Average Scores")
+
+# abline
+abline(0,0)
+```
+<br>
+
+There is a random variation variation above and below zero indicating the linearity assumption is met. Additionally, there is a constant width of the points distributions indicating that that the assumption of constant variance is met.
+
+<br>
+
+
+**Creating normal plots**
+
+```{r qqplot}
+qqnorm(resids)
+qqline(resids)
+
+```
+
+<br>
+
+The normal plot shows a roughly linear distribution of points along the normal line, indicating that the assumption of normality is met for our fitted model.

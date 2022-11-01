@@ -1,0 +1,534 @@
+---
+title: "Mini Project"
+author: '''Joba Adisa'
+date: "2022-10-03"
+output: html_document
+---
+
+-------------------------------------------------------------------------------------------------------------------------------------------------
+## Credit
+
+This assignment was created using R Markdown. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+-------------------------------------------------------------------------------------------------------------------------------------------------
+
+## Setup
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+## Introduction
+
+In this assignment I used linear regression modeling to analyze the relationship between South Carolina (SC) schools average SAT Mathematics Score and the following variables:
+
+1. SAT - Average Critical Reading Score
+2. Student-teacher ratio in core subjects - Current year
+3. Percent of teachers with advanced degrees - Current year
+4. Percent of teachers returning from previous year - three year average - Current year
+
+
+The analysis is conducted using data from the 2021 South Carolina school report card data, and the analysis is limited to only traditional high schools is SC.
+
+
+The analysis addresses the following question:
+
+
+> Are the following variables (1) Average Critical Reading Score, (2) Student-teacher ratio in core subjects, (3) Percent of teachers with advanced degrees - Current year, and (4) Percent of teachers returning from previous year - three year average - Current year, significant predictors of  average SAT Mathematic scores in SC traditional high schools?
+
+
+The initial multiple linear regression model to predict the average SAT score in Mathematics for schools in SC from the identified explanatory variables above is as follow
+
+
+$$
+sat\_avg\_math\_score = \beta_0 + \beta_1sat\_avg\_crit\_reading\_score + \beta_2student\_teacher\_ratio\_curr\_yr + \beta_3tchadvdegree\_pct\_curr\_yr +  \beta_4tchreturn3yr\_avg\_pct\_curr\_yr + \epsilon
+$$
+
+
+
+**Justification**
+
+My decision to explore the relationship between these variables is influenced by the belief that students who are good critical readers would likely perform better at mathematics too since they would be able to pay attention to details. Additionally, I am of the opinion that a moderate students to teacher ratio will give teachers the opportunity to allocate more time for supporting individual students, while the opposite will likely be the case for schools with high student-teacher-ratio. I also wanted to see whether teachers additional qualifications has any impact on students' success in their SAT. Every year, many schools and district sponsor teachers to get an advanced degree or training and I'm interested to see if this initiative influences students' success in any way. Finally, I think when teachers consistently teach a course, they get better at it and establish good relationship with students, hence the decision to see whether the percentage of returning teachers over an three year average will influence schools' average SAT Math score in any way.
+
+
+My initial assessment is that all four variables will be a significant predictor of students' average SAT Mathematics scores in  these schools.
+
+
+The sections that follow details how the data is explored, cleaned and analyzed in order to fit the model and obtain the best fitted model for predicting average SAT scores from the selected explanatory variables in the model. 
+
+
+
+## Loading Packages
+
+```{r}
+library(readxl)  # for reading SC report card excel data
+library(janitor)  # for cleaning variable names
+library(tidyverse)  # for analysis of the data
+library(dataedu)
+library(sjPlot)
+library(GGally)
+```
+
+
+
+## Importing Data
+
+```{r}
+# Loading the SAT Scores Data
+AverageAssessmentData <- read_excel("data/ReportCardData_AdditionalInfo2021.XLSx", sheet = 6, na = "*", skip = 0)
+
+
+# Loading the Classroom Environment Data
+ClassroomEnvironmentData <- read_excel("data/ReportCardData_AdditionalInfo2021.XLSx", sheet = 11, na = c("*", "N/AV", "NA in 2020"), skip = 0)
+
+```
+
+### Initial Data Exploration
+
+
+```{r initial_exploration_1, fig.cap="Fig.1: Distibution of Data Types in the Average Assessment Data"}
+# getting the first few observations in the scores data
+glimpse(AverageAssessmentData)
+
+# Using the vis_dat() in the visdat package to explore the data types in our data
+visdat::vis_dat(AverageAssessmentData)
+
+```
+
+Initial exploration shows that the assessment data set which contains schools average SAT scores has 340 rows and 27 columns. The data contains numeric data, characters and a lot of missing data too.
+
+
+```{r initial_exploration_2, fig.cap="Fig.2: Distibution of Data Types in the Classroom Environment Data"}
+# getting the first few observations in the classroom env. data
+glimpse(ClassroomEnvironmentData)
+# Using the vis_dat() in the visdat package to explore the data types in our data
+visdat::vis_dat(ClassroomEnvironmentData)
+```
+
+
+Initial exploration shows that the classroom environment data set which contains schools average SAT scores has 1049 rows and 33 columns, with three of the columns completely empty. The data contains numeric data, characters and a lot of missing data too.
+
+## Processing Data
+
+Based on personal preference, I prefer to work with lower case variable names and I will be using the `clean_names()` function in the {janitor} package to truncate the names of the columns in both data sets. I will also remove the three empty columns in the Classroom Environment  Dataset
+
+```{r}
+# cleaning names to make it tidy
+AverageAssessmentData <- clean_names(AverageAssessmentData)
+ClassroomEnvironmentData <- clean_names(ClassroomEnvironmentData)
+
+# removing empty rows from the data set
+AverageAssessmentData <- remove_empty(AverageAssessmentData, c("rows", "cols"))
+ClassroomEnvironmentData <- remove_empty(ClassroomEnvironmentData, c("rows", "cols"))
+
+# renaming column names to make it tidy
+AverageAssessmentData <- 
+  AverageAssessmentData %>% 
+  rename(school_id = schoolid,
+         school_type_cd = schooltypecd)
+
+ClassroomEnvironmentData <- 
+  ClassroomEnvironmentData %>% 
+  rename(school_id = schoolid,
+         school_type_cd = schooltypecd)
+```
+
+
+Further inspection of the data shows that *school_id* is of different data types in both data set as shown below
+```{r}
+typeof(ClassroomEnvironmentData$school_id) # outputs character
+typeof(AverageAssessmentData$school_id)  # outputs double
+```
+
+Since I will be joining both data sets using the school IDs I will need to make sure they are of the same data types in bothe data. Hence, school_id will be changed to numeric in the Classroom Environment Data as shown in block of code that follows
+
+```{r}
+# Saving the school_id variable as numeric
+ClassroomEnvironmentData <- ClassroomEnvironmentData %>% 
+  mutate(school_id = as.numeric(school_id))
+```
+
+Now we can inspect the data to see the result of our operation
+```{r}
+glimpse(ClassroomEnvironmentData)
+```
+
+Next step is to Join both data sets by the School ID and School Type column into a new data set called *sc_education_data*.
+
+```{r}
+# left join both data sets
+sc_education_data <- 
+  left_join(AverageAssessmentData, ClassroomEnvironmentData, 
+            by = c("school_id", "school_type_cd"))
+
+dim(sc_education_data)
+```
+
+
+The combined data set has a dimension of 342 rows and 55 columns representing SC schools with average SAT scores in various subjects. Since my analysis is limited to traditional high schools in SC, I will use the filter function to limit the data set to only those that are high schools. Further filtering will be done using the str_detect() function in tidyverse {stringr} package to make sure only traditional high schools are selected. This involves removing any school name that includes the strings “Academy”, “Charter”, “College”, “Magnet”, “School Of”, or “School For” as well as any district name that includes the strings “Charter”, “Unified”, or “Governor’s”.
+
+```{r}
+# reducing observation to only high schools (H)
+sc_highschool_data <- sc_education_data %>% 
+  filter(school_type_cd == "H")  # outputs 252 observations
+
+# Reducing observation to only traditional high schools
+sc_highschool_data <- sc_highschool_data %>% 
+  filter(str_detect(school_nm.x, "Academy|Charter|College|Magnet|School Of|School For", negate = TRUE)) %>% 
+  filter(str_detect(district_nm.x, "Charter|Unified|Governor's", negate = TRUE))  # returns 193 observations
+
+# Taking a glimpse at the data set
+glimpse(sc_highschool_data)
+```
+
+
+A glimpse at the data set shows that the observation has been reduced to 193 Traditional High Schools. The student to teacher ratio columns however needs further tidying. It contains entry that are currently in form of a sentence, for example, we have "22.5 to 1" as the ratio of students to teachers. We can just stick to the number of students for the purpose of this analysis. This will be addressed using the mutate() function as shown in the block of code below.
+
+```{r mutate_tch_ratio}
+# selecting only the number of students and converting it to a numeric data type
+sc_highschool_data <- sc_highschool_data %>% 
+  mutate(student_teacher_ratio_curr_yr = as.numeric(str_sub(student_teacher_ratio_curr_yr, start = 1, end = 4)))
+```
+
+
+Next I will use the `select()` function to reduce the data set to only include useful identifiers and the variables of interest in my chosen model. This include district name, school name, school ID, and student avg_sat_mat_score, 
+
+```{r}
+# Selecting a subset of the data for analysis
+df <- sc_highschool_data %>% 
+  select(school_id,
+         district_nm.x,
+         school_nm.x,
+         sat_avg_math_score,
+         sat_avg_crit_reading_score,
+         tchadvdegree_pct_curr_yr,
+         student_teacher_ratio_curr_yr,
+         tchreturn3yr_avg_pct_curr_yr)
+         
+```
+
+
+```{r}
+# renaming the column names
+df <- df %>% 
+  rename(school_name = school_nm.x,
+         district_name = district_nm.x)
+
+head(df)
+```
+
+## Analysis
+
+This analysis will include three components: a univariate data analysis, a bivariate data analysis, and a linear regression analysis. 
+
+
+
+### Univariate Analysis
+
+For the univariate analysis, I will plot a distribution of each of the selected variables using a box plot. Next I will calculate the summary statistics for each of the variables including the mean, standard deviation, minimum, maximum, median, and IQR.
+
+### Distribution of average SAT Maths Scores 2021
+
+
+```{r plot1, fig.cap="Fig.3: 2021 Distribution of SAT Math Scores for Traditional High Schools in SC"}
+df %>% 
+  ggplot(aes(x=sat_avg_math_score)) +
+  geom_boxplot(fill = dataedu_colors("yellow")) +
+  theme_dataedu() +
+    theme(text = element_text(size=20), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  labs(title = "Distribution of SAT Math Scores for Traditional High Schools in SC",
+       x = "Average SAT Math Scores")
+```
+The Summary Statistics for this distribution is as follow:
+
+```{r}
+df %>% 
+  summarise("Minimun" = min(sat_avg_math_score, na.rm = TRUE),
+            "Median" = median(sat_avg_math_score, na.rm = TRUE),
+            "Maximum" = max(sat_avg_math_score, na.rm = TRUE),
+            "IQR" = IQR(sat_avg_math_score, na.rm = TRUE),
+            "Mean" = mean(sat_avg_math_score, na.rm = TRUE),
+            "SD" = sd(sat_avg_math_score, na.rm = TRUE), 
+            n = n())
+```
+
+
+The boxplot shows that there is a considerable amount of variation in the average SAT Math Scores for SC high schools in the year 2021, with the minimum score being 366 and maximum score being 572 while the median score is 481.5. The plot also appear to be fairly symmetry even though the mean (mean=480.0924) is slightly lower than the median due to the minimum score, however, it is not considered an outlier.
+
+
+
+### Distribution of average SAT Critical Reading Scores 2021
+
+
+```{r sat_reading_avg, fig.cap="Fig.4: 2021 Distribution of SAT Critical Reading Scores for Traditional High Schools in SC"}
+df %>% 
+  ggplot(aes(x=sat_avg_crit_reading_score)) +
+  geom_boxplot(fill = dataedu_colors("yellow")) +
+  theme_dataedu() +
+    theme(text = element_text(size=20), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank() 
+        ) +
+  labs(title = "Distribution of SC Students Average SAT Critical Reading Score for the Year 2021",
+       x = "Average Score")
+```
+
+The Summary Statistics for this distribution is as follow:
+
+```{r}
+df %>% 
+  summarise("Minimun" = min(sat_avg_crit_reading_score, na.rm = TRUE),
+            "Median" = median(sat_avg_crit_reading_score, na.rm = TRUE),
+            "Maximum" = max(sat_avg_crit_reading_score, na.rm = TRUE),
+            "IQR" = IQR(sat_avg_crit_reading_score, na.rm = TRUE),
+            "Mean" = mean(sat_avg_crit_reading_score, na.rm = TRUE),
+            "SD" = sd(sat_avg_crit_reading_score, na.rm = TRUE), 
+            n = n())
+```
+
+
+The boxplot shows that there is a considerable amount of variation in the average SAT Crtical Reading Scores for SC high schools in the year 2021, with the minimum score being 386 and maximum score being 583 while the median score is 507. The plot also appear to be skewed to the left evidenced by the longer lower tail of the box plot and the mean score (mean=502.39) that is lower than the median. The minimum score is also an outlier that pull the mean in its direction.
+
+
+### Distribution of SC Schools Student-Teacher Ratio in Core Subject
+
+```{r std_tch_ratio, fig.cap="Fig.5: 2021 Distribution of Average Student-to-Teacher Ratio for Traditional High Schools in SC"}
+df %>% 
+  ggplot(aes(x=student_teacher_ratio_curr_yr)) +
+  geom_boxplot(fill = dataedu_colors("yellow")) +
+  theme_dataedu() +
+  theme(text = element_text(size=20), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank() 
+        ) +
+  labs(title = "Distribution of SC Schools Student-Teachers Ratio for the Year 2021",
+       x = "Number of Students Per Teacher")
+
+```
+
+
+The Summary Statistics is for this distribution is as follow:
+
+```{r}
+df %>% 
+  summarise("Minimun" = min(student_teacher_ratio_curr_yr, na.rm = TRUE),
+            "Median" = median(student_teacher_ratio_curr_yr, na.rm = TRUE),
+            "Maximum" = max(student_teacher_ratio_curr_yr, na.rm = TRUE),
+            "IQR" = IQR(student_teacher_ratio_curr_yr, na.rm = TRUE),
+            "Mean" = mean(student_teacher_ratio_curr_yr, na.rm = TRUE),
+            "SD" = sd(student_teacher_ratio_curr_yr, na.rm = TRUE), 
+            n = n())
+```
+
+The boxplot shows that there is a great amount of variation in the average Student-Teacher Ratio in Core Subjects among SC traditional high schools for the year 2021. The distribution is also skewed to the left with a lot of outliers. 
+
+
+
+### Distribution of Average SC Schools Teachers with an Advanced Degree 
+
+
+```{r adv_degree, fig.cap="Fig.6: 2021 Distribution of Average Percentage of Teachers With an Advanced Degree in Traditional High Schools in SC"}
+df %>% 
+  ggplot(aes(x=tchadvdegree_pct_curr_yr)) +
+  geom_boxplot(fill = dataedu_colors("yellow")) +
+  theme_dataedu() +
+  theme(text = element_text(size=20), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank() 
+        ) +
+  labs(title = "Distribution of Average Teachers With Advanced Degree in SC Schools for the Year 2021",
+       x = "Percentage of Teachers with an Advanced Degree (%)")
+```
+
+
+The Summary Statistics is for this distribution is as follow:
+
+```{r}
+df %>% 
+  summarise("Minimun" = min(tchadvdegree_pct_curr_yr, na.rm = TRUE),
+            "Median" = median(tchadvdegree_pct_curr_yr, na.rm = TRUE),
+            "Maximum" = max(tchadvdegree_pct_curr_yr, na.rm = TRUE),
+            "IQR" = IQR(tchadvdegree_pct_curr_yr, na.rm = TRUE),
+            "Mean" = mean(tchadvdegree_pct_curr_yr, na.rm = TRUE),
+            "SD" = sd(tchadvdegree_pct_curr_yr, na.rm = TRUE), 
+            n = n())
+```
+
+
+The boxplot shows that there is a considerable amount of variation in the average percentage of teachers with advanced degrees among traditional SC high schools in the year 2021. The school with the minimum percentage of teachers with an advanced degree in core courses have a 40% while the  maximum was 86.5% and the median percentage of teachers with advanced degree in this sample was 68.34%. The plot also appear to be skewed to the left evidenced by the longer lower tail of the box plot and the mean percentage that is lower than the median. The minimum percentage is also an outlier that pull the mean in its the direction.
+
+
+
+### Distribution of SC Schools Teachers returning over a 3 year average
+
+
+The box plot (Figure 1) of the average number of returning teachers over 3 years in the year 2021 shows that ...
+
+```{r returning_tch, fig.cap="Fig.7: 2021 Distribution of Average Percentage of Teachers Returning From Previous Year - 3 Year Average - Current Year"}
+df %>% 
+  ggplot(aes(x=tchreturn3yr_avg_pct_curr_yr)) +
+  geom_boxplot(fill = dataedu_colors("yellow")) +
+  theme_dataedu() +
+  theme(text = element_text(size=20), axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+  labs(title = "Distribution of Average Percentage of Returning Teachers- 3 Year Average -for the Year 2021",
+       x = "Percentage of Returning Teachers over a 3 Year Average (%)")
+```
+
+
+The Summary Statistics is for this distribution is as follow:
+
+```{r}
+df %>% 
+  summarise("Minimun" = min(tchreturn3yr_avg_pct_curr_yr, na.rm = TRUE),
+            "Median" = median(tchreturn3yr_avg_pct_curr_yr, na.rm = TRUE),
+            "Maximum" = max(tchreturn3yr_avg_pct_curr_yr, na.rm = TRUE),
+            "IQR" = IQR(tchreturn3yr_avg_pct_curr_yr, na.rm = TRUE),
+            "Mean" = mean(tchreturn3yr_avg_pct_curr_yr, na.rm = TRUE),
+            "SD" = sd(tchreturn3yr_avg_pct_curr_yr, na.rm = TRUE), 
+            n = n())
+```
+
+The boxplot shows that there is a considerable amount of variation in the average percentage of returning teachers (3 year average) among traditional SC high schools in the year 2021. The school with the minimum percentage has 66% of teachers returning over an average of 3 years while the school with the maximum percentage has an estimated 97% of teachers returning over an average of 3 years in the year 2021. The plot also appear to be skewed to the left evidenced by the longer lower tail of the box plot and the mean percentage that is lower than the median. 
+
+
+
+## Bivariate Data Analysis
+
+
+In this section, I provide a scatterplot and correlation matrix that includes all the variables in the chosen model.
+
+```{r scatter_plot, fig.cap="Fig.8: Scatter Plot and Correlation Matrix of the Selected Variables"}
+# Using ggpairs to create a scatterplot matrix
+df %>% 
+  select(-c(school_id, school_name, district_name)) %>% 
+  ggpairs(title = "Scatterplot Matrix of Selected SC Traditional High School Report Data", columnLabels = c("Avg Math Score", "Cri. Reading", "Tch. Adv Degree", "Student-Teacher Ration", "% Returning Tch.")) +
+  theme_dataedu()  +
+  theme(strip.text.x = element_text(size = 15), 
+        strip.text.y = element_text(size = 15))
+```
+
+The scatterplot matrix above shows that schools' average SAT critical reading score has the strongest linear relationship with the response variable (Average SAT Maths Score), r= .952, followed by the percentage of teachers returning from the previous year (three year average) during the current year (r = 0.463). The other two explanatory variables in the chosen model (tchadvdegree_pct_curr_yr and tchreturn3yr_avg_pct_curr_yr) also have a linear relationship with SC High Schools' average SAT scores in Maths, but the relationship is a weak one. There is also a moderately strong linear relationship between the percentage of returning teachers and schools' average SAT score in critical  reading.
+
+
+
+Since there are no categorical explanatory variables in the model, there is no need to visualize or summarize by groups.
+
+
+## Linear Regression Analysis: Using Backward Elimination Method
+
+I will use th `lm()` function to fit the initial multiple regression model that includes all of the selected explanatory variables. The model summary will thereafter be displayed using the `tab_model` function.
+
+
+Model 0:
+
+
+$$
+\hat{sat\_avg\_math\_score} = \hat\beta_0 + \hat\beta_1(sat\_avg\_crit\_reading\_score) + \hat\beta_2(student\_teacher\_ratio\_curr\_yr) + \hat\beta_3(tchadvdegree\_pct\_curr\_yr) + \hat\beta_4(tchreturn3yr\_avg\_pct\_curr\_yr)
+$$
+
+
+```{r}
+# fitting the model
+model_0 = lm(sat_avg_math_score ~ sat_avg_crit_reading_score + student_teacher_ratio_curr_yr + tchadvdegree_pct_curr_yr + tchreturn3yr_avg_pct_curr_yr, data=df)
+
+# tabulating a summary of the fitted model
+tab_model(model_0, title = "Table 1: Summary of fitted model 0")
+```
+
+
+
+Table 1 above shows that the fitted model has an adjusted R-squared of .906 and the variable *student_teacher_ratio_curr_yr* (average student to teacher ratio in core subject) has the highest p-value of 0.529. This suggests that *student_teacher_ratio_curr_yr* is not a significant predictor of Schools Average SAT Score in Mathematics after accounting for variations in the other variables in the fitted model. 
+
+
+
+Using a backward elimination method, *student_teacher_ratio_curr_yr* will be dropped from the model, and the model is refitted as shown below
+
+Model 1: 
+
+
+$$
+\hat{sat\_avg\_math\_score} = \hat\beta_0 + \hat\beta_1(sat\_avg\_crit\_reading\_score) + \hat\beta_2(tchadvdegree\_pct\_curr\_yr) + \hat\beta_3(tchreturn3yr\_avg\_pct\_curr\_yr)
+$$
+
+```{r}
+# fitting the model
+model_1 = lm(sat_avg_math_score ~ sat_avg_crit_reading_score + tchadvdegree_pct_curr_yr + tchreturn3yr_avg_pct_curr_yr, data=df)
+
+# tabulating a summary of the fitted model
+tab_model(model_1, title = "Table 2: Summary of fitted model 1")
+```
+
+
+After accounting for variations in *sat_avg_crit_reading_score* and *tchadvdegree_pct_curr_yr*, we have evidence that the variable *tchreturn3yr_avg_pct_curr_yr* is not a significant predictor (p-value = .292) of SC schools' average SAT Score in Mathematics in the year 2021.
+
+
+
+Using a backward elimination method, *tchreturn3yr_avg_pct_curr_yr* will be dropped from the model, and the model is refitted as shown below
+
+Model 2: 
+
+
+$$
+\hat{sat\_avg\_math\_score} = \hat\beta_0 + \hat\beta_1(sat\_avg\_crit\_reading\_score) + \hat\beta_2(tchadvdegree\_pct\_curr\_yr)
+$$
+
+
+```{r}
+# fitting the model
+model_2 = lm(sat_avg_math_score ~ sat_avg_crit_reading_score + tchadvdegree_pct_curr_yr, data=df)
+
+# tabulating a summary of the fitted model
+tab_model(model_2, title = "Table 3: Summary of Final Model Predicting SC Schools' SAT Math Score")
+```
+
+
+
+In our final model summary (Table 3), both variables (i.e. sat_avg_crit_reading_score and tchadvdegree_pct_curr_yr) were significant predictors of schools' average SAT scores in mathematics with p-values < 0.05. 
+
+
+
+Next, I will be assessing the assumptions of linearity, constant variance and normality for the final model. The assumptions of linearity and constant variance will be checked using a residual vs fitted plot while that of normality will be assessed using a Quantile-Quartile plot of the residuals. The codes are shown below:
+
+
+
+```{r resids, fig.cap= "Fig.9: Residual vs Fitted plot"}
+# getting the residual values
+resids <- resid(model_2)
+# getting the fitted values
+fits <- fitted(model_2)
+# plotting residual vs fitted values using base R plot function
+plot(fits, resids,  pch=19, xlab="Fitted Values", ylab="Residual Values")
+# setting intercept and slope as 0,0
+abline(0, 0)
+```
+
+
+
+In the residual plot above, there is a random variation of points above and below zero indicating that the linearity assumption is met. Additionally, the points are distributed along a constant width indicating that the assumption of constant variance is also met.
+
+
+
+```{r q_qplot, fig.cap="Fig.10: Quantile Quartile Plot of Residuals"}
+qqnorm(resids)
+qqline(resids, col="red")
+
+```
+
+
+The normal plot shows a roughly linear distribution of points along the normal line, indicating that the assumption of normality is met for our fitted model.
+
+
+
+### Interpretation of coefficients
+
+From the model summary in table 3 above, the coefficient of sat_avg_crit_reading_score in our fitted model is 0.99 and the coefficient of tchadvdegree_pct_curr_yr is 0.36. As such we can conclude that a unit increase in a school's average SAT Score in critical reading will lead to an estimated  increase of 0.99 in the school's average SAT score in Mathematics after accounting for variations in the percentage of teachers with an advanced degree in core subjects. Similarly, a unit increase in the average percentage of teachers with an advanced degree in the school will result in an estimated increase of 0.36 in the school's average SAT score in Mathematics after accounting for variations in the schools' average SAT score in critical reading.
+
+
+
+## Conclusion
+
+This analysis investigated whether the average critical reading score, student-teacher ratio in core subjects, percentage of teachers with advanced degrees, and the percentage of teachers returning from previous year (on a three year average) for traditional high schools in SC are useful predictors of the average SAT scores in  mathematics in these schools. A multiple regression analysis of the response variable and these potential predictors showed that the following variables: "student-teacher ratio in core subjects" and "the percent of teachers returning from previous year (on a three year average)" are not useful predictors of Schools average SAT score in mathematics after accounting for variations in  the schools' average SAT score in critical reading and the percentage of teachers with advanced degree in the current year, 2021.
+
+
+
+The fact that Schools average SAT score was a strong predictor of their average SAT score in mathematics was not really surprising due to the very strong correlation between both variables in Figure 8 above. Moreover, as earlier hypothesized, one would expect schools with very high average critical reading scores and with a high percentage of Teachers with advanced degrees to also excel at mathematics. However, the significant effect of the percentage of teachers with advanced degree is quite interesting and it suggests that supporting/sponsoring teachers in these population to obtain higher degrees in core subject might be a worthwhile investment. As such schools or districts where fewer teachers hold an advanced degree in core subject might want to support teachers 
+
